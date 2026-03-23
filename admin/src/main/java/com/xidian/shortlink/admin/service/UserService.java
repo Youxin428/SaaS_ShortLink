@@ -8,5 +8,8 @@ import com.xidian.shortlink.admin.dto.resp.UserRespDTO;
  * 用户服务接口
  */
 public interface UserService extends IService<UserDO> {
+
     UserRespDTO getUserByUserName(String username);
+
+    Boolean hasUsername(String username);
 }
