@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.xidian.shortlink.admin.common.constant.RedisCacheConstant;
 import com.xidian.shortlink.admin.common.convention.exception.ClientException;
 import com.xidian.shortlink.admin.common.enums.UserErrorCode;
 import com.xidian.shortlink.admin.dao.entity.UserDO;
@@ -13,6 +14,8 @@ import com.xidian.shortlink.admin.dto.resp.UserRespDTO;
 import com.xidian.shortlink.admin.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.redisson.api.RBloomFilter;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +27,7 @@ import org.springframework.stereotype.Service;
 public class UserServiceImpl extends ServiceImpl<UserMapper, UserDO> implements UserService {
 
     private final RBloomFilter<String> userRegisterCachePenetrationBloomFilter;
+    private final RedissonClient redissonClient;
 
     @Override
     public UserRespDTO getUserByUserName(String username) {
@@ -48,11 +52,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserDO> implements 
         if(hasUsername(userReqParam.getUsername())){
             throw new ClientException(UserErrorCode.USER_NAME_EXIST);
         }
-        int inserted = baseMapper.insert(BeanUtil.toBean(userReqParam, UserDO.class));
-        if(inserted < 1){
-            throw new ClientException(UserErrorCode.USER_SAVE_ERROR);
+        RLock lock = redissonClient.getLock(RedisCacheConstant.LOCK_USER_REGISTER_KEY + userReqParam.getUsername());
+        try {
+            if(lock.tryLock()){
+                int inserted = baseMapper.insert(BeanUtil.toBean(userReqParam, UserDO.class));
+                if(inserted < 1){
+                    throw new ClientException(UserErrorCode.USER_SAVE_ERROR);
+                }
+                userRegisterCachePenetrationBloomFilter.add(userReqParam.getUsername());
+                return;
+            }
+            throw new ClientException(UserErrorCode.USER_NAME_EXIST);
+        } finally {
+            lock.unlock();
         }
-        userRegisterCachePenetrationBloomFilter.add(userReqParam.getUsername());
+
     }
 
 }
